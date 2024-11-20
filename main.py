@@ -1,48 +1,74 @@
-import streamlit as st
+import os
+import csv
+from concurrent.futures import ThreadPoolExecutor
 from scholarly import scholarly
 
-def fetch_publications_by_scholar_id(scholar_id):
+def fetch_publications(scholar_id):
+    """Fetch publications for a given Scholar ID."""
     try:
-        # Search for the author using their Scholar ID
         author = scholarly.search_author_id(scholar_id)
-        author = scholarly.fill(author)  # Fill complete author details
-
+        author = scholarly.fill(author)  # Fetch author details
         publications = []
+
         for pub in author['publications']:
-            pub_details = scholarly.fill(pub)
+            # Extract basic publication info
+            title = pub.get('bib', {}).get('title', 'N/A')
+            year = pub.get('bib', {}).get('pub_year', 'N/A')
+            citation_count = pub.get('num_citations', 0)
+
             publications.append({
-                'title': pub_details.get('bib', {}).get('title', 'N/A'),
-                'year': pub_details.get('bib', {}).get('pub_year', 'N/A'),
-                'venue': pub_details.get('bib', {}).get('venue', 'N/A'),
-                'citation_count': pub_details.get('num_citations', 0)
+                'title': title,
+                'year': year,
+                'citation_count': citation_count
             })
 
-        return author['name'], publications
+        return publications
 
     except Exception as e:
-        return None, str(e)
+        print(f"Error fetching data for Scholar ID {scholar_id}: {e}")
+        return None
 
-# Streamlit UI
-st.title("Google Scholar Publications Fetcher")
-st.write("Enter the Scholar ID to fetch the publication details.")
 
-# Input for Scholar ID
-scholar_id = st.text_input("Enter Scholar ID (e.g., rnaR6eEAAAAJ):", "")
+def save_to_csv(publications, name, department):
+    """Save publications to a CSV file in department-based folder."""
+    folder_path = os.path.join("Generated", department)
+    os.makedirs(folder_path, exist_ok=True)
 
-if st.button("Fetch Publications"):
-    if scholar_id.strip():
-        st.write("Fetching publications...")
-        author_name, publication_details = fetch_publications_by_scholar_id(scholar_id.strip())
+    file_path = os.path.join(folder_path, f"{name}.csv")
 
-        if publication_details:
-            st.write(f"### Publications for {author_name}:")
-            for idx, pub in enumerate(publication_details, start=1):
-                st.write(
-                    f"{idx}. **{pub['title']}** ({pub['year']}) - {pub['venue']}, "
-                    f"Citations: {pub['citation_count']}"
-                )
-        else:
-            st.error(f"Error: {publication_details}")
-    else:
-        st.error("Please enter a valid Scholar ID.")
+    with open(file_path, mode="w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["Title", "Year", "Citation Count"])  # Header
+        for pub in publications:
+            writer.writerow([pub['title'], pub['year'], pub['citation_count']])
 
+    print(f"File saved: {file_path}")
+
+
+def process_faculty(faculty):
+    """Process a single faculty member."""
+    number, name, scholar_id, department = faculty
+    print(f"Processing: {name} (Scholar ID: {scholar_id}, Department: {department})")
+    publications = fetch_publications(scholar_id)
+    if publications:
+        save_to_csv(publications, name, department)
+
+
+def main():
+    input_file = "faculty.csv"  # Input file containing faculty data
+
+    # Read faculty details from the CSV file
+    faculty_list = []
+    with open(input_file, mode="r", encoding="utf-8") as file:
+        reader = csv.reader(file)
+        next(reader)  # Skip header
+        for row in reader:
+            faculty_list.append(row)
+
+    # Process faculty members in parallel
+    with ThreadPoolExecutor() as executor:
+        executor.map(process_faculty, faculty_list)
+
+
+if __name__ == "__main__":
+    main()
